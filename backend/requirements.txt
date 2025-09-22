@@ -30,3 +30,9 @@ requests>=2.31.0
 aiofiles>=23.2.1
 python-magic>=0.4.27
 validators>=0.22.0
+slowapi>=0.1.7
+
+# Machine Learning and Advanced Security Features
+numpy>=1.24.0
+scikit-learn>=1.3.0
+pandas>=2.0.0

@@ -1,53 +1,113 @@
 """
-Security Orchestration, Automation & Response (SOAR) Platform
-Automated incident response and security workflow orchestration
+SOAR Platform - Security Orchestration, Automated Response
+Comprehensive security incident response and automation
 """
 
+import logging
 import asyncio
 import json
-import uuid
+from typing import Dict, List, Optional, Any, Callable
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional, Union
 from enum import Enum
 from dataclasses import dataclass, field
-import logging
-from pathlib import Path
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
+class IncidentSeverity(Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+class IncidentStatus(Enum):
+    OPEN = "open"
+    INVESTIGATING = "investigating"
+    CONTAINED = "contained"
+    RESOLVED = "resolved"
+    CLOSED = "closed"
+
 class PlaybookStatus(Enum):
-    DRAFT = "draft"
-    ACTIVE = "active"
-    PAUSED = "paused"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-class ActionType(Enum):
-    ISOLATE_HOST = "isolate_host"
-    BLOCK_IP = "block_ip"
-    QUARANTINE_FILE = "quarantine_file"
-    RESET_PASSWORD = "reset_password"
-    SEND_ALERT = "send_alert"
-    COLLECT_EVIDENCE = "collect_evidence"
-    CREATE_TICKET = "create_ticket"
-    RUN_SCAN = "run_scan"
-    UPDATE_THREAT_INTEL = "update_threat_intel"
-    EXECUTE_SCRIPT = "execute_script"
-    APPROVE_ACTION = "approve_action"
-    WAIT = "wait"
-
-class ExecutionStatus(Enum):
-    PENDING = "pending"
+    IDLE = "idle"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
-    SKIPPED = "skipped"
-    REQUIRES_APPROVAL = "requires_approval"
+    PAUSED = "paused"
+
+class ResponseAction(Enum):
+    BLOCK_IP = "block_ip"
+    ISOLATE_HOST = "isolate_host"
+    RESET_PASSWORD = "reset_password"
+    DISABLE_ACCOUNT = "disable_account"
+    QUARANTINE_FILE = "quarantine_file"
+    SEND_ALERT = "send_alert"
+    CREATE_TICKET = "create_ticket"
+    COLLECT_LOGS = "collect_logs"
+    SCAN_SYSTEM = "scan_system"
+    UPDATE_RULES = "update_rules"
 
 @dataclass
-class PlaybookAction:
-    id: str
+class SOARAction:
+    action_id: str
+    action_type: ResponseAction
+    parameters: Dict[str, Any]
+    condition: Optional[str] = None
+    timeout: int = 300  # 5 minutes default
+    retry_count: int = 3
+    success_criteria: Optional[str] = None
+
+@dataclass
+class PlaybookStep:
+    step_id: str
+    name: str
+    description: str
+    actions: List[SOARAction]
+    parallel: bool = False
+    required: bool = True
+    depends_on: List[str] = field(default_factory=list)
+
+@dataclass
+class SecurityPlaybook:
+    playbook_id: str
+    name: str
+    description: str
+    trigger_conditions: List[str]
+    severity_threshold: IncidentSeverity
+    steps: List[PlaybookStep]
+    auto_execute: bool = False
+    approval_required: bool = True
+    tags: List[str] = field(default_factory=list)
+
+@dataclass
+class SecurityIncident:
+    incident_id: str
+    title: str
+    description: str
+    severity: IncidentSeverity
+    status: IncidentStatus
+    created_at: datetime
+    updated_at: datetime
+    source: str
+    indicators: List[Dict[str, Any]]
+    affected_assets: List[str]
+    assigned_to: Optional[str] = None
+    playbooks_executed: List[str] = field(default_factory=list)
+    evidence: List[Dict[str, Any]] = field(default_factory=list)
+    timeline: List[Dict[str, Any]] = field(default_factory=list)
+
+@dataclass
+class PlaybookExecution:
+    execution_id: str
+    playbook_id: str
+    incident_id: str
+    status: PlaybookStatus
+    started_at: datetime
+    completed_at: Optional[datetime] = None
+    current_step: Optional[str] = None
+    execution_log: List[Dict[str, Any]] = field(default_factory=list)
+    success_rate: float = 0.0
+
+class SOAROrchestrator:
     name: str
     action_type: ActionType
     parameters: Dict[str, Any]
@@ -688,6 +748,277 @@ class SOARPlatform:
                 } for log in execution.logs
             ]
         }
+    
+    async def approve_action(self, approval_id: str, approved: bool, reason: str = "") -> bool:
+        """Approve or deny a pending action"""
+        for req in self.approval_queue:
+            if req['id'] == approval_id and req['status'] == 'pending':
+                req['status'] = 'approved' if approved else 'denied'
+                req['reason'] = reason
+                req['approved_at'] = datetime.now()
+                return True
+        return False
+    
+    async def get_pending_approvals(self) -> List[Dict[str, Any]]:
+        """Get all pending approval requests"""
+        return [req for req in self.approval_queue if req['status'] == 'pending']
+    
+    async def get_metrics(self) -> Dict[str, Any]:
+        """Get SOAR platform metrics"""
+        total_playbooks = len(self.playbooks)
+        active_playbooks = len([p for p in self.playbooks.values() if p.status == PlaybookStatus.ACTIVE])
+        total_executions = len(self.executions)
+        
+        # Execution status counts
+        execution_status_counts = {}
+        for execution in self.executions.values():
+            status = execution.status.value
+            execution_status_counts[status] = execution_status_counts.get(status, 0) + 1
+        
+        # Success rate calculation
+        completed_executions = [e for e in self.executions.values() if e.status == ExecutionStatus.COMPLETED]
+        success_rate = len(completed_executions) / total_executions if total_executions > 0 else 0
+        
+        # Recent activity (last 24 hours)
+        cutoff = datetime.now() - timedelta(hours=24)
+        recent_executions = [e for e in self.executions.values() if e.started_at > cutoff]
+        
+        return {
+            "total_playbooks": total_playbooks,
+            "active_playbooks": active_playbooks,
+            "total_executions": total_executions,
+            "execution_status_counts": execution_status_counts,
+            "success_rate": success_rate,
+            "recent_executions": len(recent_executions),
+            "pending_approvals": len([req for req in self.approval_queue if req['status'] == 'pending']),
+            "platform_uptime": self._get_uptime()
+        }
+    
+    def _get_uptime(self) -> str:
+        """Get platform uptime"""
+        # Simple uptime calculation - would be more sophisticated in production
+        return "24h 15m"
+
+# Global SOAR platform instance
+soar_platform = SOARPlatform()
+
+# Initialize default playbooks
+async def initialize_default_playbooks():
+    """Initialize default security playbooks"""
+    
+    # Critical Incident Response Playbook
+    critical_incident_playbook = {
+        "id": "critical_incident_response",
+        "name": "Critical Incident Response",
+        "description": "Automated response to critical security incidents",
+        "version": "1.0",
+        "trigger_conditions": {
+            "severity": {"operator": "equals", "value": "critical"},
+            "confidence": {"operator": "greater_than", "value": 0.8}
+        },
+        "actions": [
+            {
+                "id": "isolate_affected_hosts",
+                "name": "Isolate Affected Hosts",
+                "action_type": "isolate_host",
+                "parameters": {
+                    "host": "{affected_host}"
+                },
+                "timeout_seconds": 120,
+                "requires_approval": False
+            },
+            {
+                "id": "block_malicious_ips",
+                "name": "Block Malicious IPs",
+                "action_type": "block_ip",
+                "parameters": {
+                    "ip_address": "{source_ip}",
+                    "duration": 3600
+                },
+                "timeout_seconds": 60,
+                "requires_approval": False
+            },
+            {
+                "id": "send_critical_alert",
+                "name": "Send Critical Alert",
+                "action_type": "send_alert",
+                "parameters": {
+                    "recipients": ["security-team@company.com", "soc@company.com"],
+                    "subject": "CRITICAL: Security Incident Detected",
+                    "message": "Critical security incident detected: {incident_description}"
+                },
+                "timeout_seconds": 30,
+                "requires_approval": False
+            },
+            {
+                "id": "collect_forensic_evidence",
+                "name": "Collect Forensic Evidence",
+                "action_type": "collect_evidence",
+                "parameters": {
+                    "target": "{affected_host}",
+                    "evidence_types": ["memory_dump", "disk_image", "network_logs"]
+                },
+                "timeout_seconds": 1800,
+                "requires_approval": True,
+                "depends_on": ["isolate_affected_hosts"]
+            },
+            {
+                "id": "create_incident_ticket",
+                "name": "Create Incident Ticket",
+                "action_type": "create_ticket",
+                "parameters": {
+                    "title": "Critical Security Incident: {incident_type}",
+                    "description": "{incident_description}",
+                    "priority": "critical"
+                },
+                "timeout_seconds": 60,
+                "requires_approval": False
+            }
+        ],
+        "tags": ["critical", "incident_response", "automated"]
+    }
+    
+    # Malware Detection Response Playbook
+    malware_response_playbook = {
+        "id": "malware_response",
+        "name": "Malware Detection Response",
+        "description": "Automated response to malware detection",
+        "version": "1.0",
+        "trigger_conditions": {
+            "threat_type": {"operator": "equals", "value": "malware"},
+            "action_required": {"operator": "equals", "value": True}
+        },
+        "actions": [
+            {
+                "id": "quarantine_malware",
+                "name": "Quarantine Malicious File",
+                "action_type": "quarantine_file",
+                "parameters": {
+                    "file_path": "{file_path}",
+                    "file_hash": "{file_hash}"
+                },
+                "timeout_seconds": 60,
+                "requires_approval": False
+            },
+            {
+                "id": "isolate_infected_host",
+                "name": "Isolate Infected Host",
+                "action_type": "isolate_host",
+                "parameters": {
+                    "host": "{infected_host}"
+                },
+                "timeout_seconds": 120,
+                "requires_approval": False
+            },
+            {
+                "id": "update_threat_signatures",
+                "name": "Update Threat Intelligence",
+                "action_type": "update_threat_intel",
+                "parameters": {
+                    "indicators": ["{file_hash}", "{domain}", "{ip_address}"],
+                    "source": "malware_analysis"
+                },
+                "timeout_seconds": 300,
+                "requires_approval": False,
+                "depends_on": ["quarantine_malware"]
+            },
+            {
+                "id": "scan_network_for_malware",
+                "name": "Network-wide Malware Scan",
+                "action_type": "run_scan",
+                "parameters": {
+                    "scan_type": "malware",
+                    "targets": ["all_endpoints"]
+                },
+                "timeout_seconds": 3600,
+                "requires_approval": True,
+                "depends_on": ["update_threat_signatures"]
+            }
+        ],
+        "tags": ["malware", "automated", "endpoint_security"]
+    }
+    
+    # Data Breach Response Playbook
+    data_breach_playbook = {
+        "id": "data_breach_response",
+        "name": "Data Breach Response",
+        "description": "Response to potential data breach incidents",
+        "version": "1.0",
+        "trigger_conditions": {
+            "incident_type": {"operator": "equals", "value": "data_breach"},
+            "severity": {"operator": "in", "value": ["high", "critical"]}
+        },
+        "actions": [
+            {
+                "id": "immediate_containment",
+                "name": "Immediate Containment",
+                "action_type": "isolate_host",
+                "parameters": {
+                    "host": "{breach_source}"
+                },
+                "timeout_seconds": 120,
+                "requires_approval": False
+            },
+            {
+                "id": "collect_breach_evidence",
+                "name": "Collect Breach Evidence",
+                "action_type": "collect_evidence",
+                "parameters": {
+                    "target": "{breach_source}",
+                    "evidence_types": ["access_logs", "file_access", "network_traffic"]
+                },
+                "timeout_seconds": 1800,
+                "requires_approval": False,
+                "depends_on": ["immediate_containment"]
+            },
+            {
+                "id": "reset_compromised_accounts",
+                "name": "Reset Compromised Accounts",
+                "action_type": "reset_password",
+                "parameters": {
+                    "username": "{compromised_users}"
+                },
+                "timeout_seconds": 300,
+                "requires_approval": True,
+                "depends_on": ["immediate_containment"]
+            },
+            {
+                "id": "notify_legal_team",
+                "name": "Notify Legal and Compliance",
+                "action_type": "send_alert",
+                "parameters": {
+                    "recipients": ["legal@company.com", "compliance@company.com"],
+                    "subject": "Data Breach Incident - Legal Review Required",
+                    "message": "Potential data breach detected requiring legal review: {incident_description}"
+                },
+                "timeout_seconds": 60,
+                "requires_approval": False
+            },
+            {
+                "id": "create_breach_ticket",
+                "name": "Create Data Breach Ticket",
+                "action_type": "create_ticket",
+                "parameters": {
+                    "title": "Data Breach Incident: {affected_data_types}",
+                    "description": "{incident_description}",
+                    "priority": "critical"
+                },
+                "timeout_seconds": 60,
+                "requires_approval": False
+            }
+        ],
+        "tags": ["data_breach", "compliance", "privacy"]
+    }
+    
+    # Create playbooks
+    await soar_platform.create_playbook(critical_incident_playbook)
+    await soar_platform.create_playbook(malware_response_playbook)
+    await soar_platform.create_playbook(data_breach_playbook)
+    
+    # Activate playbooks
+    for playbook_id in ["critical_incident_response", "malware_response", "data_breach_response"]:
+        if playbook_id in soar_platform.playbooks:
+            soar_platform.playbooks[playbook_id].status = PlaybookStatus.ACTIVE
     
     async def approve_action(self, approval_id: str, approved: bool, reason: str = "") -> bool:
         """Approve or deny a pending action"""
