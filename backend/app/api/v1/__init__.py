@@ -24,22 +24,26 @@ try:
     from app.api.v1.soar import router as soar_router
     from app.api.v1.advanced_threat_detection import router as advanced_threat_router
     from app.api.v1.vulnerability_management import router as vulnerability_router
+    from app.api.v1.threat_intelligence import router as threat_intelligence_router
     ai_remediation_available = True
     threat_hunting_available = True
     soar_available = True
     advanced_threat_available = True
     vulnerability_management_available = True
+    threat_intelligence_available = True
 except ImportError:
     ai_remediation_router = None
     threat_hunting_router = None
     soar_router = None
     advanced_threat_router = None
     vulnerability_router = None
+    threat_intelligence_router = None
     ai_remediation_available = False
     threat_hunting_available = False
     soar_available = False
     advanced_threat_available = False
     vulnerability_management_available = False
+    threat_intelligence_available = False
     soar_router = None
     ai_remediation_available = False
     threat_hunting_available = False
@@ -103,6 +107,8 @@ if advanced_threat_available and advanced_threat_router:
     api_router.include_router(advanced_threat_router, prefix="/threat-detection", tags=["Advanced Threat Detection"])
 if vulnerability_management_available and vulnerability_router:
     api_router.include_router(vulnerability_router, prefix="/vulnerability-management", tags=["Vulnerability Management"])
+if threat_intelligence_available and threat_intelligence_router:
+    api_router.include_router(threat_intelligence_router, tags=["Threat Intelligence"])
 if security_analysis_available and security_analysis_router:
     api_router.include_router(security_analysis_router, prefix="/analysis", tags=["Enhanced Security Analysis"])
 
