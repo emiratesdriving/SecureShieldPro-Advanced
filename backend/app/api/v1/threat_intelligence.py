@@ -1,541 +1,573 @@
 """
-Threat Intelligence API endpoints
-Provides REST API for threat intelligence operations including IOC management,
-threat actor profiling, and threat analysis.
+Advanced Threat Intelligence API endpoints
+Provides comprehensive IOC management, threat actor profiling, and intelligence feeds
 """
 
-from fastapi import APIRouter, HTTPException, Query, Depends
-from typing import List, Dict, Optional, Any
-from datetime import datetime
-import json
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_, desc, func
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta
+import uuid
+import ipaddress
+import re
+import hashlib
+from urllib.parse import urlparse
 
-from app.services.threat_intelligence import (
-    threat_intel_platform,
-    IOCType,
-    ThreatLevel, 
-    ConfidenceLevel
+from app.db.database import get_db
+from app.db.models import (
+    IOC, ThreatActor, ThreatCampaign, IOCDetection, 
+    ThreatIntelFeed, ThreatIntelReport,
+    IOCType, ThreatActorType, ThreatLevel
 )
+from app.core.auth import get_current_user
 
-router = APIRouter(prefix="/api/v1/threat-intelligence", tags=["Threat Intelligence"])
+router = APIRouter(prefix="/threat-intelligence", tags=["threat-intelligence"])
 
-# Pydantic Models
-class IOCCreate(BaseModel):
-    type: str = Field(..., description="IOC type (ip_address, domain, url, file_hash, etc.)")
-    value: str = Field(..., description="IOC value")
-    threat_level: str = Field(default="medium", description="Threat level")
-    confidence: str = Field(default="medium", description="Confidence level")
-    description: str = Field(default="", description="IOC description")
-    source: str = Field(default="Manual Entry", description="Source of IOC")
-    tags: List[str] = Field(default=[], description="Associated tags")
-    related_campaigns: List[str] = Field(default=[], description="Related campaign IDs")
-    related_actors: List[str] = Field(default=[], description="Related threat actor IDs")
-    attributes: Dict[str, Any] = Field(default={}, description="Additional attributes")
+# ============================================================================
+# IOC MANAGEMENT ENDPOINTS
+# ============================================================================
 
-class IOCResponse(BaseModel):
-    id: str
-    type: str
-    value: str
-    threat_level: str
-    confidence: str
-    description: str
-    source: str
-    first_seen: datetime
-    last_seen: datetime
-    tags: List[str]
-    related_campaigns: List[str]
-    related_actors: List[str]
-    attributes: Dict[str, Any]
-    is_active: bool
-    false_positive: bool
-
-class ThreatActorResponse(BaseModel):
-    id: str
-    name: str
-    aliases: List[str]
-    description: str
-    country: Optional[str]
-    motivation: List[str]
-    sophistication: str
-    targets: List[str]
-    ttps: List[str]
-    associated_iocs: List[str]
-    campaigns: List[str]
-    first_observed: datetime
-    last_activity: datetime
-    is_active: bool
-
-class ThreatCampaignResponse(BaseModel):
-    id: str
-    name: str
-    description: str
-    actors: List[str]
-    start_date: datetime
-    end_date: Optional[datetime]
-    targets: List[str]
-    objectives: List[str]
-    iocs: List[str]
-    ttps: List[str]
-    is_active: bool
-
-class IOCAnalysisResponse(BaseModel):
-    ioc_value: str
-    analysis_time: str
-    threat_level: str
-    confidence: str
-    malicious: bool
-    sources: List[str]
-    attributes: Dict[str, Any]
-    validation: Optional[str] = None
-    type: Optional[str] = None
-    related_actors: Optional[List[str]] = None
-    related_campaigns: Optional[List[str]] = None
-
-# API Endpoints
-
-@router.get("/overview", response_model=Dict[str, Any])
-async def get_threat_landscape():
-    """Get overview of current threat landscape"""
-    try:
-        landscape = await threat_intel_platform.get_threat_landscape()
-        return {
-            "status": "success",
-            "data": landscape,
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get threat landscape: {str(e)}")
-
-@router.get("/iocs", response_model=Dict[str, Any])
+@router.get("/iocs")
 async def get_iocs(
-    limit: int = Query(50, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    limit: int = Query(100, le=1000),
     offset: int = Query(0, ge=0),
     ioc_type: Optional[str] = Query(None),
     threat_level: Optional[str] = Query(None),
+    is_active: Optional[bool] = Query(None),
     search: Optional[str] = Query(None)
 ):
-    """Get list of IOCs with optional filtering"""
-    try:
-        all_iocs = list(threat_intel_platform.iocs.values())
-        
-        # Apply filters
-        if ioc_type:
-            all_iocs = [ioc for ioc in all_iocs if ioc.type.value == ioc_type]
-        
-        if threat_level:
-            all_iocs = [ioc for ioc in all_iocs if ioc.threat_level.value == threat_level]
-        
-        if search:
-            search_results = await threat_intel_platform.search_iocs(search, ioc_type, threat_level)
-            all_iocs = search_results
-        
-        # Apply pagination
-        total = len(all_iocs)
-        paginated_iocs = all_iocs[offset:offset + limit]
-        
-        # Convert to response format
-        ioc_responses = []
-        for ioc in paginated_iocs:
-            ioc_responses.append(IOCResponse(
-                id=ioc.id,
-                type=ioc.type.value,
-                value=ioc.value,
-                threat_level=ioc.threat_level.value,
-                confidence=ioc.confidence.value,
-                description=ioc.description,
-                source=ioc.source,
-                first_seen=ioc.first_seen,
-                last_seen=ioc.last_seen,
-                tags=ioc.tags,
-                related_campaigns=ioc.related_campaigns,
-                related_actors=ioc.related_actors,
-                attributes=ioc.attributes,
-                is_active=ioc.is_active,
-                false_positive=ioc.false_positive
-            ))
-        
-        return {
-            "status": "success",
-            "data": {
-                "iocs": [ioc.dict() for ioc in ioc_responses],
-                "total": total,
-                "limit": limit,
-                "offset": offset
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get IOCs: {str(e)}")
-
-@router.post("/iocs", response_model=Dict[str, Any])
-async def create_ioc(ioc_data: IOCCreate):
-    """Create a new IOC"""
-    try:
-        # Validate IOC type
-        if ioc_data.type not in [ioc_type.value for ioc_type in IOCType]:
-            raise HTTPException(status_code=400, detail=f"Invalid IOC type: {ioc_data.type}")
-        
-        # Validate threat level
-        if ioc_data.threat_level not in [level.value for level in ThreatLevel]:
-            raise HTTPException(status_code=400, detail=f"Invalid threat level: {ioc_data.threat_level}")
-        
-        # Validate confidence level
-        if ioc_data.confidence not in [conf.value for conf in ConfidenceLevel]:
-            raise HTTPException(status_code=400, detail=f"Invalid confidence level: {ioc_data.confidence}")
-        
-        # Create IOC
-        ioc = await threat_intel_platform.add_ioc(ioc_data.dict())
-        
-        ioc_response = IOCResponse(
-            id=ioc.id,
-            type=ioc.type.value,
-            value=ioc.value,
-            threat_level=ioc.threat_level.value,
-            confidence=ioc.confidence.value,
-            description=ioc.description,
-            source=ioc.source,
-            first_seen=ioc.first_seen,
-            last_seen=ioc.last_seen,
-            tags=ioc.tags,
-            related_campaigns=ioc.related_campaigns,
-            related_actors=ioc.related_actors,
-            attributes=ioc.attributes,
-            is_active=ioc.is_active,
-            false_positive=ioc.false_positive
+    """Get IOCs with filtering and pagination"""
+    query = db.query(IOC)
+    
+    # Apply filters
+    if ioc_type:
+        query = query.filter(IOC.type == ioc_type)
+    if threat_level:
+        query = query.filter(IOC.threat_level == threat_level)
+    if is_active is not None:
+        query = query.filter(IOC.is_active == is_active)
+    if search:
+        query = query.filter(
+            or_(
+                IOC.value.ilike(f"%{search}%"),
+                IOC.description.ilike(f"%{search}%")
+            )
         )
-        
-        return {
-            "status": "success",
-            "data": ioc_response.dict(),
-            "message": "IOC created successfully",
-            "timestamp": datetime.now().isoformat()
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create IOC: {str(e)}")
-
-@router.get("/iocs/{ioc_id}", response_model=Dict[str, Any])
-async def get_ioc(ioc_id: str):
-    """Get specific IOC by ID"""
-    try:
-        ioc = threat_intel_platform.iocs.get(ioc_id)
-        if not ioc:
-            raise HTTPException(status_code=404, detail="IOC not found")
-        
-        ioc_response = IOCResponse(
-            id=ioc.id,
-            type=ioc.type.value,
-            value=ioc.value,
-            threat_level=ioc.threat_level.value,
-            confidence=ioc.confidence.value,
-            description=ioc.description,
-            source=ioc.source,
-            first_seen=ioc.first_seen,
-            last_seen=ioc.last_seen,
-            tags=ioc.tags,
-            related_campaigns=ioc.related_campaigns,
-            related_actors=ioc.related_actors,
-            attributes=ioc.attributes,
-            is_active=ioc.is_active,
-            false_positive=ioc.false_positive
-        )
-        
-        return {
-            "status": "success",
-            "data": ioc_response.dict(),
-            "timestamp": datetime.now().isoformat()
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get IOC: {str(e)}")
-
-@router.post("/analyze", response_model=Dict[str, Any])
-async def analyze_ioc(data: Dict[str, str]):
-    """Analyze an IOC value"""
-    try:
-        ioc_value = data.get("ioc_value")
-        if not ioc_value:
-            raise HTTPException(status_code=400, detail="ioc_value is required")
-        
-        analysis = await threat_intel_platform.analyze_ioc(ioc_value)
-        
-        return {
-            "status": "success",
-            "data": analysis,
-            "timestamp": datetime.now().isoformat()
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to analyze IOC: {str(e)}")
-
-@router.get("/actors", response_model=Dict[str, Any])
-async def get_threat_actors(
-    limit: int = Query(50, ge=1, le=1000),
-    offset: int = Query(0, ge=0)
-):
-    """Get list of threat actors"""
-    try:
-        all_actors = list(threat_intel_platform.threat_actors.values())
-        total = len(all_actors)
-        
-        # Apply pagination
-        paginated_actors = all_actors[offset:offset + limit]
-        
-        # Convert to response format
-        actor_responses = []
-        for actor in paginated_actors:
-            actor_responses.append(ThreatActorResponse(
-                id=actor.id,
-                name=actor.name,
-                aliases=actor.aliases,
-                description=actor.description,
-                country=actor.country,
-                motivation=actor.motivation,
-                sophistication=actor.sophistication,
-                targets=actor.targets,
-                ttps=actor.ttps,
-                associated_iocs=actor.associated_iocs,
-                campaigns=actor.campaigns,
-                first_observed=actor.first_observed,
-                last_activity=actor.last_activity,
-                is_active=actor.is_active
-            ))
-        
-        return {
-            "status": "success",
-            "data": {
-                "threat_actors": [actor.dict() for actor in actor_responses],
-                "total": total,
-                "limit": limit,
-                "offset": offset
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get threat actors: {str(e)}")
-
-@router.get("/actors/{actor_id}", response_model=Dict[str, Any])
-async def get_threat_actor(actor_id: str):
-    """Get specific threat actor profile"""
-    try:
-        actor = await threat_intel_platform.get_threat_actor_profile(actor_id)
-        if not actor:
-            raise HTTPException(status_code=404, detail="Threat actor not found")
-        
-        # Get related IOCs
-        related_iocs = await threat_intel_platform.get_related_iocs(actor_id)
-        
-        actor_response = ThreatActorResponse(
-            id=actor.id,
-            name=actor.name,
-            aliases=actor.aliases,
-            description=actor.description,
-            country=actor.country,
-            motivation=actor.motivation,
-            sophistication=actor.sophistication,
-            targets=actor.targets,
-            ttps=actor.ttps,
-            associated_iocs=actor.associated_iocs,
-            campaigns=actor.campaigns,
-            first_observed=actor.first_observed,
-            last_activity=actor.last_activity,
-            is_active=actor.is_active
-        )
-        
-        return {
-            "status": "success",
-            "data": {
-                "actor": actor_response.dict(),
-                "related_iocs": [
-                    {
-                        "id": ioc.id,
-                        "type": ioc.type.value,
-                        "value": ioc.value,
-                        "threat_level": ioc.threat_level.value,
-                        "description": ioc.description
-                    } for ioc in related_iocs
-                ]
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get threat actor: {str(e)}")
-
-@router.get("/campaigns", response_model=Dict[str, Any])
-async def get_threat_campaigns(
-    limit: int = Query(50, ge=1, le=1000),
-    offset: int = Query(0, ge=0)
-):
-    """Get list of threat campaigns"""
-    try:
-        all_campaigns = list(threat_intel_platform.campaigns.values())
-        total = len(all_campaigns)
-        
-        # Apply pagination
-        paginated_campaigns = all_campaigns[offset:offset + limit]
-        
-        # Convert to response format
-        campaign_responses = []
-        for campaign in paginated_campaigns:
-            campaign_responses.append(ThreatCampaignResponse(
-                id=campaign.id,
-                name=campaign.name,
-                description=campaign.description,
-                actors=campaign.actors,
-                start_date=campaign.start_date,
-                end_date=campaign.end_date,
-                targets=campaign.targets,
-                objectives=campaign.objectives,
-                iocs=campaign.iocs,
-                ttps=campaign.ttps,
-                is_active=campaign.is_active
-            ))
-        
-        return {
-            "status": "success",
-            "data": {
-                "campaigns": [campaign.dict() for campaign in campaign_responses],
-                "total": total,
-                "limit": limit,
-                "offset": offset
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get threat campaigns: {str(e)}")
-
-@router.get("/attribution/{ioc_value}", response_model=Dict[str, Any])
-async def get_ioc_attribution(ioc_value: str):
-    """Get threat actor attribution for an IOC"""
-    try:
-        attributions = await threat_intel_platform.get_actor_attribution(ioc_value)
-        
-        return {
-            "status": "success",
-            "data": {
-                "ioc_value": ioc_value,
-                "attributions": attributions
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get IOC attribution: {str(e)}")
-
-@router.get("/search", response_model=Dict[str, Any])
-async def search_threat_intelligence(
-    query: str = Query(..., description="Search query"),
-    search_type: str = Query("all", description="Search type: all, iocs, actors, campaigns"),
-    limit: int = Query(50, ge=1, le=1000)
-):
-    """Search across threat intelligence data"""
-    try:
-        results = {
-            "query": query,
-            "search_type": search_type,
-            "results": {}
-        }
-        
-        if search_type in ["all", "iocs"]:
-            ioc_results = await threat_intel_platform.search_iocs(query)
-            results["results"]["iocs"] = [
-                {
-                    "id": ioc.id,
-                    "type": ioc.type.value,
-                    "value": ioc.value,
-                    "threat_level": ioc.threat_level.value,
-                    "description": ioc.description,
-                    "tags": ioc.tags
-                } for ioc in ioc_results[:limit]
-            ]
-        
-        if search_type in ["all", "actors"]:
-            actor_results = []
-            for actor in threat_intel_platform.threat_actors.values():
-                if (query.lower() in actor.name.lower() or 
-                    query.lower() in actor.description.lower() or
-                    any(query.lower() in alias.lower() for alias in actor.aliases)):
-                    actor_results.append({
-                        "id": actor.id,
-                        "name": actor.name,
-                        "aliases": actor.aliases,
-                        "country": actor.country,
-                        "description": actor.description
-                    })
-            results["results"]["actors"] = actor_results[:limit]
-        
-        if search_type in ["all", "campaigns"]:
-            campaign_results = []
-            for campaign in threat_intel_platform.campaigns.values():
-                if (query.lower() in campaign.name.lower() or 
-                    query.lower() in campaign.description.lower()):
-                    campaign_results.append({
-                        "id": campaign.id,
-                        "name": campaign.name,
-                        "description": campaign.description,
-                        "actors": campaign.actors,
-                        "targets": campaign.targets
-                    })
-            results["results"]["campaigns"] = campaign_results[:limit]
-        
-        return {
-            "status": "success",
-            "data": results,
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to search threat intelligence: {str(e)}")
-
-@router.get("/statistics", response_model=Dict[str, Any])
-async def get_threat_statistics():
-    """Get threat intelligence statistics"""
-    try:
-        stats = {
-            "ioc_statistics": {
-                "total_iocs": len(threat_intel_platform.iocs),
-                "active_iocs": sum(1 for ioc in threat_intel_platform.iocs.values() if ioc.is_active),
-                "by_type": {},
-                "by_threat_level": {},
-                "by_confidence": {}
-            },
-            "actor_statistics": {
-                "total_actors": len(threat_intel_platform.threat_actors),
-                "active_actors": sum(1 for actor in threat_intel_platform.threat_actors.values() if actor.is_active),
-                "by_country": {},
-                "by_sophistication": {}
-            },
-            "campaign_statistics": {
-                "total_campaigns": len(threat_intel_platform.campaigns),
-                "active_campaigns": sum(1 for campaign in threat_intel_platform.campaigns.values() if campaign.is_active)
+    
+    # Get total count
+    total = query.count()
+    
+    # Apply pagination and ordering
+    iocs = query.order_by(desc(IOC.created_at)).offset(offset).limit(limit).all()
+    
+    return {
+        "iocs": [
+            {
+                "ioc_id": ioc.ioc_id,
+                "type": ioc.type.value if ioc.type else None,
+                "value": ioc.value,
+                "description": ioc.description,
+                "threat_level": ioc.threat_level.value if ioc.threat_level else None,
+                "confidence": ioc.confidence,
+                "source": ioc.source,
+                "tags": ioc.tags,
+                "first_seen": ioc.first_seen.isoformat() if ioc.first_seen else None,
+                "last_seen": ioc.last_seen.isoformat() if ioc.last_seen else None,
+                "detection_count": ioc.detection_count,
+                "is_active": ioc.is_active,
+                "threat_actor": ioc.threat_actor.name if ioc.threat_actor else None,
+                "campaign": ioc.campaign.name if ioc.campaign else None,
+                "created_at": ioc.created_at.isoformat()
             }
+            for ioc in iocs
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset
+    }
+
+@router.post("/iocs")
+async def create_ioc(
+    ioc_data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Create a new IOC"""
+    
+    # Validate IOC type and value
+    ioc_type = ioc_data.get("type")
+    ioc_value = ioc_data.get("value")
+    
+    if not ioc_type or not ioc_value:
+        raise HTTPException(status_code=400, detail="IOC type and value are required")
+    
+    # Validate IOC format
+    validation_result = await validate_ioc_format(ioc_type, ioc_value)
+    if not validation_result["valid"]:
+        raise HTTPException(status_code=400, detail=validation_result["error"])
+    
+    # Check for duplicates
+    existing_ioc = db.query(IOC).filter(
+        and_(IOC.type == ioc_type, IOC.value == ioc_value)
+    ).first()
+    
+    if existing_ioc:
+        raise HTTPException(status_code=409, detail="IOC already exists")
+    
+    # Create new IOC
+    new_ioc = IOC(
+        ioc_id=str(uuid.uuid4()),
+        type=IOCType(ioc_type),
+        value=ioc_value,
+        description=ioc_data.get("description"),
+        threat_level=ThreatLevel(ioc_data.get("threat_level", "medium")),
+        confidence=ioc_data.get("confidence", 50),
+        source=ioc_data.get("source", "manual"),
+        source_url=ioc_data.get("source_url"),
+        tags=ioc_data.get("tags", []),
+        first_seen=datetime.fromisoformat(ioc_data["first_seen"]) if ioc_data.get("first_seen") else datetime.utcnow(),
+        last_seen=datetime.fromisoformat(ioc_data["last_seen"]) if ioc_data.get("last_seen") else None
+    )
+    
+    db.add(new_ioc)
+    db.commit()
+    db.refresh(new_ioc)
+    
+    return {
+        "message": "IOC created successfully",
+        "ioc_id": new_ioc.ioc_id,
+        "created_at": new_ioc.created_at.isoformat()
+    }
+
+@router.get("/iocs/{ioc_id}")
+async def get_ioc_details(
+    ioc_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get detailed information about a specific IOC"""
+    
+    ioc = db.query(IOC).filter(IOC.ioc_id == ioc_id).first()
+    if not ioc:
+        raise HTTPException(status_code=404, detail="IOC not found")
+    
+    # Get recent detections
+    recent_detections = db.query(IOCDetection).filter(
+        IOCDetection.ioc_id == ioc.id
+    ).order_by(desc(IOCDetection.detected_at)).limit(10).all()
+    
+    return {
+        "ioc_id": ioc.ioc_id,
+        "type": ioc.type.value,
+        "value": ioc.value,
+        "description": ioc.description,
+        "threat_level": ioc.threat_level.value,
+        "confidence": ioc.confidence,
+        "source": ioc.source,
+        "source_url": ioc.source_url,
+        "tags": ioc.tags,
+        "first_seen": ioc.first_seen.isoformat() if ioc.first_seen else None,
+        "last_seen": ioc.last_seen.isoformat() if ioc.last_seen else None,
+        "valid_from": ioc.valid_from.isoformat(),
+        "valid_until": ioc.valid_until.isoformat() if ioc.valid_until else None,
+        "is_active": ioc.is_active,
+        "is_whitelist": ioc.is_whitelist,
+        "detection_count": ioc.detection_count,
+        "last_detection": ioc.last_detection.isoformat() if ioc.last_detection else None,
+        "threat_actor": {
+            "name": ioc.threat_actor.name,
+            "actor_type": ioc.threat_actor.actor_type.value,
+            "country": ioc.threat_actor.country
+        } if ioc.threat_actor else None,
+        "campaign": {
+            "name": ioc.campaign.name,
+            "description": ioc.campaign.description,
+            "is_active": ioc.campaign.is_active
+        } if ioc.campaign else None,
+        "recent_detections": [
+            {
+                "detection_id": detection.detection_id,
+                "source_system": detection.source_system,
+                "detected_at": detection.detected_at.isoformat(),
+                "risk_score": detection.risk_score,
+                "action_taken": detection.action_taken,
+                "is_false_positive": detection.is_false_positive
+            }
+            for detection in recent_detections
+        ],
+        "created_at": ioc.created_at.isoformat(),
+        "updated_at": ioc.updated_at.isoformat() if ioc.updated_at else None
+    }
+
+@router.put("/iocs/{ioc_id}")
+async def update_ioc(
+    ioc_id: str,
+    ioc_data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Update an existing IOC"""
+    
+    ioc = db.query(IOC).filter(IOC.ioc_id == ioc_id).first()
+    if not ioc:
+        raise HTTPException(status_code=404, detail="IOC not found")
+    
+    # Update fields
+    if "description" in ioc_data:
+        ioc.description = ioc_data["description"]
+    if "threat_level" in ioc_data:
+        ioc.threat_level = ThreatLevel(ioc_data["threat_level"])
+    if "confidence" in ioc_data:
+        ioc.confidence = ioc_data["confidence"]
+    if "tags" in ioc_data:
+        ioc.tags = ioc_data["tags"]
+    if "is_active" in ioc_data:
+        ioc.is_active = ioc_data["is_active"]
+    if "is_whitelist" in ioc_data:
+        ioc.is_whitelist = ioc_data["is_whitelist"]
+    
+    ioc.updated_at = datetime.utcnow()
+    db.commit()
+    
+    return {"message": "IOC updated successfully"}
+
+@router.post("/iocs/search")
+async def search_iocs(
+    search_data: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """Advanced IOC search with multiple criteria"""
+    
+    query = db.query(IOC)
+    
+    # Multi-field search
+    if search_data.get("values"):
+        values = search_data["values"]
+        query = query.filter(IOC.value.in_(values))
+    
+    if search_data.get("types"):
+        types = search_data["types"]
+        query = query.filter(IOC.type.in_(types))
+    
+    if search_data.get("threat_levels"):
+        levels = search_data["threat_levels"]
+        query = query.filter(IOC.threat_level.in_(levels))
+    
+    if search_data.get("tags"):
+        tags = search_data["tags"]
+        for tag in tags:
+            query = query.filter(func.json_contains(IOC.tags, f'"{tag}"'))
+    
+    if search_data.get("date_range"):
+        start_date = datetime.fromisoformat(search_data["date_range"]["start"])
+        end_date = datetime.fromisoformat(search_data["date_range"]["end"])
+        query = query.filter(IOC.created_at.between(start_date, end_date))
+    
+    results = query.limit(1000).all()
+    
+    return {
+        "results": [
+            {
+                "ioc_id": ioc.ioc_id,
+                "type": ioc.type.value,
+                "value": ioc.value,
+                "threat_level": ioc.threat_level.value,
+                "confidence": ioc.confidence,
+                "detection_count": ioc.detection_count,
+                "is_active": ioc.is_active,
+                "created_at": ioc.created_at.isoformat()
+            }
+            for ioc in results
+        ],
+        "total_found": len(results)
+    }
+
+# ============================================================================
+# THREAT ACTOR ENDPOINTS
+# ============================================================================
+
+@router.get("/threat-actors")
+async def get_threat_actors(
+    db: Session = Depends(get_db),
+    limit: int = Query(50, le=500),
+    offset: int = Query(0, ge=0),
+    actor_type: Optional[str] = Query(None),
+    is_active: Optional[bool] = Query(None),
+    search: Optional[str] = Query(None)
+):
+    """Get threat actors with filtering"""
+    
+    query = db.query(ThreatActor)
+    
+    if actor_type:
+        query = query.filter(ThreatActor.actor_type == actor_type)
+    if is_active is not None:
+        query = query.filter(ThreatActor.is_active == is_active)
+    if search:
+        query = query.filter(
+            or_(
+                ThreatActor.name.ilike(f"%{search}%"),
+                ThreatActor.description.ilike(f"%{search}%")
+            )
+        )
+    
+    total = query.count()
+    actors = query.order_by(desc(ThreatActor.last_seen)).offset(offset).limit(limit).all()
+    
+    return {
+        "threat_actors": [
+            {
+                "actor_id": actor.actor_id,
+                "name": actor.name,
+                "aliases": actor.aliases,
+                "actor_type": actor.actor_type.value,
+                "sophistication": actor.sophistication,
+                "country": actor.country,
+                "motivation": actor.motivation,
+                "is_active": actor.is_active,
+                "first_seen": actor.first_seen.isoformat() if actor.first_seen else None,
+                "last_seen": actor.last_seen.isoformat() if actor.last_seen else None,
+                "ioc_count": len(actor.iocs),
+                "campaign_count": len(actor.campaigns),
+                "created_at": actor.created_at.isoformat()
+            }
+            for actor in actors
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset
+    }
+
+@router.post("/threat-actors")
+async def create_threat_actor(
+    actor_data: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """Create a new threat actor profile"""
+    
+    # Check for duplicate name
+    existing_actor = db.query(ThreatActor).filter(
+        ThreatActor.name == actor_data.get("name")
+    ).first()
+    
+    if existing_actor:
+        raise HTTPException(status_code=409, detail="Threat actor with this name already exists")
+    
+    new_actor = ThreatActor(
+        actor_id=str(uuid.uuid4()),
+        name=actor_data["name"],
+        aliases=actor_data.get("aliases", []),
+        description=actor_data.get("description"),
+        actor_type=ThreatActorType(actor_data["actor_type"]),
+        sophistication=actor_data.get("sophistication"),
+        country=actor_data.get("country"),
+        region=actor_data.get("region"),
+        motivation=actor_data.get("motivation", []),
+        targets=actor_data.get("targets", []),
+        ttps=actor_data.get("ttps", []),
+        tools=actor_data.get("tools", []),
+        first_seen=datetime.fromisoformat(actor_data["first_seen"]) if actor_data.get("first_seen") else datetime.utcnow()
+    )
+    
+    db.add(new_actor)
+    db.commit()
+    db.refresh(new_actor)
+    
+    return {
+        "message": "Threat actor created successfully",
+        "actor_id": new_actor.actor_id,
+        "created_at": new_actor.created_at.isoformat()
+    }
+
+# ============================================================================
+# DETECTION ENDPOINTS
+# ============================================================================
+
+@router.post("/detections")
+async def create_ioc_detection(
+    detection_data: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
+    """Record an IOC detection event"""
+    
+    # Find the IOC
+    ioc = db.query(IOC).filter(IOC.value == detection_data["ioc_value"]).first()
+    if not ioc:
+        # Auto-create IOC if it doesn't exist
+        ioc = IOC(
+            ioc_id=str(uuid.uuid4()),
+            type=IOCType(detection_data.get("ioc_type", "ip")),
+            value=detection_data["ioc_value"],
+            threat_level=ThreatLevel.MEDIUM,
+            confidence=50,
+            source="auto_detection",
+            first_seen=datetime.utcnow()
+        )
+        db.add(ioc)
+        db.flush()
+    
+    # Create detection record
+    detection = IOCDetection(
+        detection_id=str(uuid.uuid4()),
+        ioc_id=ioc.id,
+        source_system=detection_data["source_system"],
+        detection_method=detection_data.get("detection_method"),
+        asset_affected=detection_data.get("asset_affected"),
+        user_affected=detection_data.get("user_affected"),
+        event_data=detection_data.get("event_data"),
+        risk_score=detection_data.get("risk_score", 50),
+        action_taken=detection_data.get("action_taken"),
+        detected_at=datetime.fromisoformat(detection_data["detected_at"]) if detection_data.get("detected_at") else datetime.utcnow()
+    )
+    
+    # Update IOC statistics
+    ioc.detection_count += 1
+    ioc.last_detection = detection.detected_at
+    ioc.last_seen = detection.detected_at
+    
+    db.add(detection)
+    db.commit()
+    
+    return {
+        "message": "Detection recorded successfully",
+        "detection_id": detection.detection_id,
+        "ioc_id": ioc.ioc_id
+    }
+
+# ============================================================================
+# ANALYTICS ENDPOINTS
+# ============================================================================
+
+@router.get("/analytics/summary")
+async def get_threat_intelligence_summary(db: Session = Depends(get_db)):
+    """Get threat intelligence platform summary statistics"""
+    
+    # IOC statistics
+    total_iocs = db.query(IOC).count()
+    active_iocs = db.query(IOC).filter(IOC.is_active == True).count()
+    
+    # IOCs by type
+    ioc_by_type = db.query(IOC.type, func.count(IOC.id)).group_by(IOC.type).all()
+    
+    # IOCs by threat level
+    ioc_by_threat_level = db.query(IOC.threat_level, func.count(IOC.id)).group_by(IOC.threat_level).all()
+    
+    # Recent detections (last 24 hours)
+    recent_detections = db.query(IOCDetection).filter(
+        IOCDetection.detected_at >= datetime.utcnow() - timedelta(hours=24)
+    ).count()
+    
+    # Threat actors
+    total_actors = db.query(ThreatActor).count()
+    active_actors = db.query(ThreatActor).filter(ThreatActor.is_active == True).count()
+    
+    # Campaigns
+    total_campaigns = db.query(ThreatCampaign).count()
+    active_campaigns = db.query(ThreatCampaign).filter(ThreatCampaign.is_active == True).count()
+    
+    return {
+        "iocs": {
+            "total": total_iocs,
+            "active": active_iocs,
+            "by_type": {ioc_type.value: count for ioc_type, count in ioc_by_type},
+            "by_threat_level": {level.value: count for level, count in ioc_by_threat_level}
+        },
+        "detections": {
+            "last_24h": recent_detections
+        },
+        "threat_actors": {
+            "total": total_actors,
+            "active": active_actors
+        },
+        "campaigns": {
+            "total": total_campaigns,
+            "active": active_campaigns
         }
-        
-        # IOC statistics by type
-        for ioc in threat_intel_platform.iocs.values():
-            ioc_type = ioc.type.value
-            threat_level = ioc.threat_level.value
-            confidence = ioc.confidence.value
-            
-            stats["ioc_statistics"]["by_type"][ioc_type] = stats["ioc_statistics"]["by_type"].get(ioc_type, 0) + 1
-            stats["ioc_statistics"]["by_threat_level"][threat_level] = stats["ioc_statistics"]["by_threat_level"].get(threat_level, 0) + 1
-            stats["ioc_statistics"]["by_confidence"][confidence] = stats["ioc_statistics"]["by_confidence"].get(confidence, 0) + 1
-        
-        # Actor statistics
-        for actor in threat_intel_platform.threat_actors.values():
-            country = actor.country or "Unknown"
-            sophistication = actor.sophistication
-            
-            stats["actor_statistics"]["by_country"][country] = stats["actor_statistics"]["by_country"].get(country, 0) + 1
-            stats["actor_statistics"]["by_sophistication"][sophistication] = stats["actor_statistics"]["by_sophistication"].get(sophistication, 0) + 1
-        
-        return {
-            "status": "success",
-            "data": stats,
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get threat statistics: {str(e)}")
+    }
+
+@router.get("/analytics/trends")
+async def get_threat_trends(
+    days: int = Query(30, ge=1, le=365),
+    db: Session = Depends(get_db)
+):
+    """Get threat intelligence trends over time"""
+    
+    start_date = datetime.utcnow() - timedelta(days=days)
+    
+    # IOC creation trends
+    ioc_trends = db.query(
+        func.date(IOC.created_at).label('date'),
+        func.count(IOC.id).label('count')
+    ).filter(
+        IOC.created_at >= start_date
+    ).group_by(
+        func.date(IOC.created_at)
+    ).order_by('date').all()
+    
+    # Detection trends
+    detection_trends = db.query(
+        func.date(IOCDetection.detected_at).label('date'),
+        func.count(IOCDetection.id).label('count')
+    ).filter(
+        IOCDetection.detected_at >= start_date
+    ).group_by(
+        func.date(IOCDetection.detected_at)
+    ).order_by('date').all()
+    
+    return {
+        "period_days": days,
+        "ioc_creation_trends": [
+            {"date": trend.date.isoformat(), "count": trend.count}
+            for trend in ioc_trends
+        ],
+        "detection_trends": [
+            {"date": trend.date.isoformat(), "count": trend.count}
+            for trend in detection_trends
+        ]
+    }
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+async def validate_ioc_format(ioc_type: str, value: str) -> Dict[str, Any]:
+    """Validate IOC format based on type"""
+    
+    if ioc_type == "ip":
+        try:
+            ipaddress.ip_address(value)
+            return {"valid": True}
+        except ValueError:
+            return {"valid": False, "error": "Invalid IP address format"}
+    
+    elif ioc_type == "domain":
+        domain_pattern = r'^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'
+        if re.match(domain_pattern, value):
+            return {"valid": True}
+        return {"valid": False, "error": "Invalid domain format"}
+    
+    elif ioc_type == "url":
+        try:
+            result = urlparse(value)
+            if result.scheme and result.netloc:
+                return {"valid": True}
+            return {"valid": False, "error": "Invalid URL format"}
+        except:
+            return {"valid": False, "error": "Invalid URL format"}
+    
+    elif ioc_type == "email":
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if re.match(email_pattern, value):
+            return {"valid": True}
+        return {"valid": False, "error": "Invalid email format"}
+    
+    elif ioc_type == "file_hash":
+        # Support MD5, SHA1, SHA256, SHA512
+        if len(value) in [32, 40, 64, 128] and re.match(r'^[a-fA-F0-9]+$', value):
+            return {"valid": True}
+        return {"valid": False, "error": "Invalid hash format"}
+    
+    # For other types, assume valid for now
+    return {"valid": True}

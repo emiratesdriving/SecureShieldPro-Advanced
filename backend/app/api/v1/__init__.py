@@ -108,7 +108,7 @@ if advanced_threat_available and advanced_threat_router:
 if vulnerability_management_available and vulnerability_router:
     api_router.include_router(vulnerability_router, prefix="/vulnerability-management", tags=["Vulnerability Management"])
 if threat_intelligence_available and threat_intelligence_router:
-    api_router.include_router(threat_intelligence_router, tags=["Threat Intelligence"])
+    api_router.include_router(threat_intelligence_router, prefix="/threat-intelligence", tags=["Threat Intelligence"])
 if security_analysis_available and security_analysis_router:
     api_router.include_router(security_analysis_router, prefix="/analysis", tags=["Enhanced Security Analysis"])
 
