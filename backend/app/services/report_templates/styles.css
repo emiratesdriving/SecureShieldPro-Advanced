@@ -1,0 +1,150 @@
+
+        body {
+            font-family: 'Arial', sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+        
+        .header {
+            border-bottom: 3px solid #2c3e50;
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        .logo {
+            height: 60px;
+            margin-bottom: 10px;
+        }
+        
+        .classification {
+            background: #e74c3c;
+            color: white;
+            padding: 5px 15px;
+            display: inline-block;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+        
+        .summary-stats {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+        }
+        
+        .stat-box {
+            text-align: center;
+            padding: 20px;
+            border-radius: 8px;
+            color: white;
+            min-width: 100px;
+        }
+        
+        .stat-box.critical { background: #e74c3c; }
+        .stat-box.high { background: #e67e22; }
+        .stat-box.medium { background: #f39c12; }
+        .stat-box.low { background: #27ae60; }
+        
+        .vulnerability {
+            border: 1px solid #ddd;
+            margin: 20px 0;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .vulnerability.critical { border-left: 5px solid #e74c3c; }
+        .vulnerability.high { border-left: 5px solid #e67e22; }
+        .vulnerability.medium { border-left: 5px solid #f39c12; }
+        .vulnerability.low { border-left: 5px solid #27ae60; }
+        
+        .vulnerability h3 {
+            background: #f8f9fa;
+            margin: 0;
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .severity-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .severity-badge.critical { background: #e74c3c; color: white; }
+        .severity-badge.high { background: #e67e22; color: white; }
+        .severity-badge.medium { background: #f39c12; color: white; }
+        .severity-badge.low { background: #27ae60; color: white; }
+        
+        .vuln-details {
+            padding: 15px;
+        }
+        
+        .vuln-details table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        .vuln-details td {
+            padding: 5px 0;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .description, .remediation, .references {
+            padding: 15px;
+            border-top: 1px solid #eee;
+        }
+        
+        .stats-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        
+        .stats-table th, .stats-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        
+        .stats-table th {
+            background: #f2f2f2;
+        }
+        
+        .stats-table tr.critical { background: #fdf2f2; }
+        .stats-table tr.high { background: #fef7f0; }
+        .stats-table tr.medium { background: #fffbf0; }
+        .stats-table tr.low { background: #f0fdf4; }
+        
+        .section {
+            margin: 40px 0;
+        }
+        
+        .toc ul {
+            list-style-type: none;
+            padding-left: 0;
+        }
+        
+        .toc li {
+            margin: 5px 0;
+        }
+        
+        .toc a {
+            color: #2c3e50;
+            text-decoration: none;
+        }
+        
+        .toc a:hover {
+            text-decoration: underline;
+        }
+        
+        @media print {
+            body { font-size: 12px; }
+            .vulnerability { page-break-inside: avoid; }
+        }
+        

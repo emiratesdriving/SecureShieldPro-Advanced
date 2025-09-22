@@ -1,0 +1,158 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ metadata.title }} - Technical Report</title>
+    <style>
+        {{ css_styles }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <img src="{{ metadata.logo_path or 'logo.png' }}" alt="Logo" class="logo">
+        <h1>{{ metadata.title }}</h1>
+        <p class="classification">{{ metadata.classification }}</p>
+        <div class="metadata">
+            <p><strong>Analyst:</strong> {{ metadata.analyst }}</p>
+            <p><strong>Scan Date:</strong> {{ metadata.scan_date.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+            <p><strong>Report Date:</strong> {{ metadata.report_date.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        </div>
+    </div>
+    
+    <div class="toc">
+        <h2>Table of Contents</h2>
+        <ul>
+            <li><a href="#summary">Executive Summary</a></li>
+            <li><a href="#methodology">Methodology</a></li>
+            <li><a href="#findings">Detailed Findings</a></li>
+            <li><a href="#recommendations">Recommendations</a></li>
+            <li><a href="#appendix">Appendix</a></li>
+        </ul>
+    </div>
+    
+    <div id="summary" class="section">
+        <h2>Executive Summary</h2>
+        <div class="summary-stats">
+            <table class="stats-table">
+                <tr>
+                    <th>Metric</th>
+                    <th>Count</th>
+                </tr>
+                <tr>
+                    <td>Files Scanned</td>
+                    <td>{{ statistics.total_files_scanned }}</td>
+                </tr>
+                <tr>
+                    <td>Total Vulnerabilities</td>
+                    <td>{{ statistics.total_vulnerabilities }}</td>
+                </tr>
+                <tr class="critical">
+                    <td>Critical</td>
+                    <td>{{ statistics.critical_count }}</td>
+                </tr>
+                <tr class="high">
+                    <td>High</td>
+                    <td>{{ statistics.high_count }}</td>
+                </tr>
+                <tr class="medium">
+                    <td>Medium</td>
+                    <td>{{ statistics.medium_count }}</td>
+                </tr>
+                <tr class="low">
+                    <td>Low</td>
+                    <td>{{ statistics.low_count }}</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+    
+    <div id="methodology" class="section">
+        <h2>Methodology</h2>
+        <h3>Tools Used</h3>
+        <ul>
+            {% for tool in statistics.tools_used %}
+            <li>{{ tool }}</li>
+            {% endfor %}
+        </ul>
+        
+        <h3>File Types Analyzed</h3>
+        <ul>
+            {% for file_type in statistics.file_types_scanned %}
+            <li>{{ file_type }}</li>
+            {% endfor %}
+        </ul>
+        
+        <p><strong>Scan Duration:</strong> {{ "%.2f"|format(statistics.scan_duration) }} seconds</p>
+    </div>
+    
+    <div id="findings" class="section">
+        <h2>Detailed Findings</h2>
+        {% for vuln in vulnerabilities %}
+        <div class="vulnerability {{ vuln.severity.lower() }}">
+            <h3>{{ vuln.title }} <span class="severity-badge {{ vuln.severity.lower() }}">{{ vuln.severity }}</span></h3>
+            
+            <div class="vuln-details">
+                <table>
+                    <tr>
+                        <td><strong>File:</strong></td>
+                        <td>{{ vuln.file_path }}</td>
+                    </tr>
+                    {% if vuln.line_number %}
+                    <tr>
+                        <td><strong>Line:</strong></td>
+                        <td>{{ vuln.line_number }}</td>
+                    </tr>
+                    {% endif %}
+                    <tr>
+                        <td><strong>Tool:</strong></td>
+                        <td>{{ vuln.tool_detected }}</td>
+                    </tr>
+                    {% if vuln.cvss_score %}
+                    <tr>
+                        <td><strong>CVSS Score:</strong></td>
+                        <td>{{ vuln.cvss_score }}</td>
+                    </tr>
+                    {% endif %}
+                    {% if vuln.cve_id %}
+                    <tr>
+                        <td><strong>CVE:</strong></td>
+                        <td><a href="https://cve.mitre.org/cgi-bin/cvename.cgi?name={{ vuln.cve_id }}">{{ vuln.cve_id }}</a></td>
+                    </tr>
+                    {% endif %}
+                    {% if vuln.cwe_id %}
+                    <tr>
+                        <td><strong>CWE:</strong></td>
+                        <td><a href="https://cwe.mitre.org/data/definitions/{{ vuln.cwe_id.replace('CWE-', '') }}.html">{{ vuln.cwe_id }}</a></td>
+                    </tr>
+                    {% endif %}
+                </table>
+            </div>
+            
+            <div class="description">
+                <h4>Description</h4>
+                <p>{{ vuln.description }}</p>
+            </div>
+            
+            <div class="remediation">
+                <h4>Remediation</h4>
+                <p>{{ vuln.remediation }}</p>
+            </div>
+            
+            {% if vuln.references %}
+            <div class="references">
+                <h4>References</h4>
+                <ul>
+                    {% for ref in vuln.references %}
+                    <li><a href="{{ ref }}">{{ ref }}</a></li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</body>
+</html>
+        

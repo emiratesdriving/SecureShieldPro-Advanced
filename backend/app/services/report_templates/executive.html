@@ -1,0 +1,62 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ metadata.title }} - Executive Summary</title>
+    <style>
+        {{ css_styles }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <img src="{{ metadata.logo_path or 'logo.png' }}" alt="Logo" class="logo">
+        <h1>{{ metadata.title }}</h1>
+        <p class="classification">{{ metadata.classification }}</p>
+    </div>
+    
+    <div class="executive-summary">
+        <h2>Executive Summary</h2>
+        <div class="summary-stats">
+            <div class="stat-box critical">
+                <h3>{{ statistics.critical_count }}</h3>
+                <p>Critical</p>
+            </div>
+            <div class="stat-box high">
+                <h3>{{ statistics.high_count }}</h3>
+                <p>High</p>
+            </div>
+            <div class="stat-box medium">
+                <h3>{{ statistics.medium_count }}</h3>
+                <p>Medium</p>
+            </div>
+            <div class="stat-box low">
+                <h3>{{ statistics.low_count }}</h3>
+                <p>Low</p>
+            </div>
+        </div>
+        
+        <div class="key-findings">
+            <h3>Key Security Findings</h3>
+            {% for vuln in critical_vulnerabilities[:5] %}
+            <div class="finding-item critical">
+                <h4>{{ vuln.title }}</h4>
+                <p>{{ vuln.description }}</p>
+                <p><strong>Risk:</strong> {{ vuln.severity }} | <strong>CVSS:</strong> {{ vuln.cvss_score or 'N/A' }}</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    
+    <div class="recommendations">
+        <h2>Immediate Actions Required</h2>
+        <ol>
+            {% for recommendation in priority_recommendations %}
+            <li>{{ recommendation }}</li>
+            {% endfor %}
+        </ol>
+    </div>
+</body>
+</html>
+        

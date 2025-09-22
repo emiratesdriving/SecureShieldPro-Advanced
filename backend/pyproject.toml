@@ -1,0 +1,123 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secureshield-pro"
+version = "1.0.0"
+description = "Professional Security Platform with SAST/DAST, AI Analysis, and Modern UI"
+authors = [
+    {name = "SecureShield Team", email = "team@secureshield.pro"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.12"
+keywords = ["security", "sast", "dast", "vulnerability", "ai", "scanning"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+]
+
+dependencies = [
+    # Core Framework
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.27.0",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+    
+    # Database & ORM
+    "sqlalchemy>=2.0.25",
+    "alembic>=1.13.0",
+    "pymysql>=1.1.0",
+    "cryptography>=42.0.0",
+    
+    # Authentication & Security
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-multipart>=0.0.9",
+    "authlib>=1.3.0",
+    "itsdangerous>=2.1.2",
+    
+    # Email & Communication
+    "emails>=0.6.0",
+    "python-dotenv>=1.0.0",
+    
+    # AI & Machine Learning
+    "ollama>=0.3.0",
+    "openai>=1.12.0",
+    "httpx>=0.27.0",
+    
+    # Security Scanning Tools
+    "bandit>=1.7.5",
+    "safety>=3.0.0",
+    "semgrep>=1.60.0",
+    "dependency-check-py>=0.9.0",
+    
+    # OCR & Document Processing
+    "pytesseract>=0.3.10",
+    "pillow>=10.2.0",
+    "pdf2image>=1.17.0",
+    
+    # Monitoring & Logging
+    "structlog>=24.1.0",
+    "rich>=13.7.0",
+    
+    # Task Queue & Background Jobs
+    "celery>=5.3.0",
+    "redis>=5.0.0",
+    
+    # Utilities
+    "requests>=2.31.0",
+    "aiofiles>=23.2.1",
+    "python-magic>=0.4.27",
+    "validators>=0.22.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.0.0",
+    "black>=24.0.0",
+    "isort>=5.13.0",
+    "flake8>=7.0.0",
+    "mypy>=1.8.0",
+    "pre-commit>=3.6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/secureshield/pro"
+Documentation = "https://docs.secureshield.pro"
+Repository = "https://github.com/secureshield/pro.git"
+Issues = "https://github.com/secureshield/pro/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.black]
+line-length = 88
+target-version = ['py312']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = "-v --tb=short --strict-markers"
+asyncio_mode = "auto"
