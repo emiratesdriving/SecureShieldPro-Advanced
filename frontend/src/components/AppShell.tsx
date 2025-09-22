@@ -18,7 +18,10 @@ import {
   ChevronRightIcon,
   Bars3Icon,
   XMarkIcon,
-  ChevronDownIcon
+  ChevronDownIcon,
+  ShieldExclamationIcon,
+  BugAntIcon,
+  FireIcon
 } from '@heroicons/react/24/outline';
 
 interface SidebarProps {
@@ -28,6 +31,9 @@ interface SidebarProps {
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
   { name: 'Enhanced Analysis', href: '/analysis', icon: ShieldCheckIcon },
+  { name: 'AI Threat Detection', href: '/threat-detection', icon: FireIcon },
+  { name: 'Vulnerability Management', href: '/vulnerability-management', icon: ShieldExclamationIcon },
+  { name: 'SOAR Platform', href: '/soar', icon: CogIcon },
   { name: 'Vulnerability Scans', href: '/scans', icon: ExclamationTriangleIcon },
   { name: 'Security Findings', href: '/findings', icon: DocumentChartBarIcon },
   { name: 'Compliance Reports', href: '/compliance', icon: DocumentChartBarIcon },
